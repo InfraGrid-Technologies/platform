@@ -1,0 +1,66 @@
+name: pr-checks
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: '22'
+      working-directory:
+        type: string
+        default: '.'
+      lint:
+        type: boolean
+        default: true
+      typecheck:
+        type: boolean
+        default: true
+      unit-tests:
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+jobs:
+  branch-policy:
+    name: branch-policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allowed source branch
+        env:
+          SRC: ${{ github.head_ref }}
+          DST: ${{ github.base_ref }}
+        run: |
+          case "$DST:$SRC" in
+            dev:feature/*|dev:chore/*|dev:dependabot/*|dev:main|dev:sit) ;;
+            sit:dev|sit:fix/*|sit:main) ;;
+            main:sit|main:hotfix/*) ;;
+            publishing:main) ;;
+            *) echo "::error::$SRC may not merge into $DST"; exit 1 ;;
+          esac
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+      - name: Install dependencies
+        id: install
+        run: npm ci
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.lint }}
+        run: npm run lint
+      - name: Type check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.typecheck }}
+        run: npx tsc --noEmit
+      - name: Unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.unit-tests }}
+        run: npm run test:unit
